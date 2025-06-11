@@ -1,9 +1,10 @@
-
 import React, { useState } from 'react';
 import { Header } from '@/components/Header';
 import { SlideThumbnails } from '@/components/SlideThumbnails';
 import { SlideCanvas } from '@/components/SlideCanvas';
 import { Slide } from '@/types/slide';
+import { processUploadedFiles } from '@/utils/slideProcessor';
+import { toast } from '@/components/ui/use-toast';
 
 const Index = () => {
   const [slides, setSlides] = useState<Slide[]>([
@@ -30,6 +31,31 @@ const Index = () => {
     };
     setSlides([...slides, newSlide]);
     setCurrentSlideId(newSlide.id);
+  };
+
+  const handleFilesUploaded = async (files: File[]) => {
+    try {
+      console.log('Processing uploaded files:', files.map(f => f.name));
+      
+      const newSlides = await processUploadedFiles(files);
+      
+      if (newSlides.length > 0) {
+        setSlides(prevSlides => [...prevSlides, ...newSlides]);
+        setCurrentSlideId(newSlides[0].id);
+        
+        toast({
+          title: "Files uploaded successfully",
+          description: `${newSlides.length} slide(s) imported from your files.`,
+        });
+      }
+    } catch (error) {
+      console.error('Error processing uploaded files:', error);
+      toast({
+        title: "Upload failed",
+        description: "There was an error processing your files. Please try again.",
+        variant: "destructive"
+      });
+    }
   };
 
   const deleteSlide = (slideId: string) => {
@@ -72,6 +98,7 @@ const Index = () => {
         presentationTitle={presentationTitle}
         onTitleChange={setPresentationTitle}
         onAddSlide={addSlide}
+        onFilesUploaded={handleFilesUploaded}
       />
       
       <div className="flex-1 flex">

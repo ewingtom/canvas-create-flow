@@ -3,17 +3,20 @@ import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Plus, Text, Move, Image } from 'lucide-react';
+import { FileUpload } from '@/components/FileUpload';
 
 interface HeaderProps {
   presentationTitle: string;
   onTitleChange: (title: string) => void;
   onAddSlide: () => void;
+  onFilesUploaded: (files: File[]) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   presentationTitle,
   onTitleChange,
-  onAddSlide
+  onAddSlide,
+  onFilesUploaded
 }) => {
   return (
     <header className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between shadow-sm">
@@ -31,6 +34,8 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       <div className="flex items-center gap-2">
+        <FileUpload onFilesUploaded={onFilesUploaded} />
+        
         <Button
           variant="outline"
           size="sm"
