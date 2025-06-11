@@ -61,6 +61,44 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     onSlideUpdate(slide.id, { title });
   };
 
+  const renderElement = (element: SlideElement) => {
+    const baseStyle = {
+      left: element.x,
+      top: element.y,
+      width: element.width,
+      height: element.height,
+      backgroundColor: element.backgroundColor,
+      color: element.color,
+      fontSize: element.fontSize,
+      borderRadius: element.type === 'circle' ? '50%' : '4px',
+    };
+
+    if (element.type === 'image') {
+      return (
+        <img
+          key={element.id}
+          src={element.content}
+          alt="Slide content"
+          className="absolute border border-dashed border-gray-400 hover:border-blue-500 transition-colors object-contain"
+          style={baseStyle}
+        />
+      );
+    }
+
+    return (
+      <div
+        key={element.id}
+        className="absolute border border-dashed border-gray-400 hover:border-blue-500 transition-colors flex items-center justify-center"
+        style={{
+          ...baseStyle,
+          padding: element.type === 'text' ? '8px' : '0'
+        }}
+      >
+        {element.content}
+      </div>
+    );
+  };
+
   return (
     <div className="flex-1 flex flex-col bg-gray-100">
       {/* Tools */}
@@ -130,28 +168,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
             style={{ backgroundColor: slide.backgroundColor }}
             onClick={handleCanvasClick}
           >
-            {slide.elements.map((element) => (
-              <div
-                key={element.id}
-                className="absolute border border-dashed border-gray-400 hover:border-blue-500 transition-colors"
-                style={{
-                  left: element.x,
-                  top: element.y,
-                  width: element.width,
-                  height: element.height,
-                  backgroundColor: element.backgroundColor,
-                  color: element.color,
-                  fontSize: element.fontSize,
-                  borderRadius: element.type === 'circle' ? '50%' : '4px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  padding: element.type === 'text' ? '8px' : '0'
-                }}
-              >
-                {element.content}
-              </div>
-            ))}
+            {slide.elements.map(renderElement)}
           </div>
         </div>
       </div>

@@ -1,7 +1,7 @@
 
 export interface SlideElement {
   id: string;
-  type: 'text' | 'rectangle' | 'circle';
+  type: 'text' | 'rectangle' | 'circle' | 'image';
   x: number;
   y: number;
   width: number;
