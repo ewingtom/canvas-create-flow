@@ -38,14 +38,26 @@ const Index = () => {
       console.log('Processing uploaded files:', files.map(f => f.name));
       
       const newSlides = await processUploadedFiles(files);
+      console.log('Slides processed:', newSlides.length, 'slides returned');
+      console.log('First slide details:', newSlides[0]?.id, 
+                'with', newSlides[0]?.elements?.length || 0, 'elements',
+                'background:', newSlides[0]?.backgroundColor);
       
       if (newSlides.length > 0) {
-        setSlides(prevSlides => [...prevSlides, ...newSlides]);
-        setCurrentSlideId(newSlides[0].id);
+        // Ensure elements array exists for all slides
+        const processedSlides = newSlides.map(slide => ({
+          ...slide,
+          elements: slide.elements || [],
+          backgroundColor: slide.backgroundColor || '#ffffff'
+        }));
+        
+        console.log('Setting slides state with', processedSlides.length, 'slides');
+        setSlides(prevSlides => [...prevSlides, ...processedSlides]);
+        setCurrentSlideId(processedSlides[0].id);
         
         toast({
           title: "Files uploaded successfully",
-          description: `${newSlides.length} slide(s) imported from your files.`,
+          description: `${processedSlides.length} slide(s) imported from your files.`,
         });
       }
     } catch (error) {

@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -17,6 +16,10 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
 }) => {
   const [selectedTool, setSelectedTool] = useState<'text' | 'rectangle' | 'circle' | null>(null);
   const [isEditing, setIsEditing] = useState(false);
+
+  // Debug logs to help diagnose rendering issues
+  console.log('SlideCanvas - Current slide:', slide); 
+  console.log('SlideCanvas - Has elements:', slide?.elements?.length || 0);
 
   if (!slide) {
     return (
@@ -57,44 +60,131 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     onSlideUpdate(slide.id, { content });
   };
 
-  const handleTitleEdit = (title: string) => {
-    onSlideUpdate(slide.id, { title });
+  // Marine Corps styling is now detected and applied automatically during file upload
+  // No need for manual application here
+
+  const handleTitleEdit = (newTitle: string) => {
+    if (onSlideUpdate) {
+      onSlideUpdate(slide.id, { title: newTitle });
+    }
   };
 
+  // This function was already declared elsewhere and has been removed
+
   const renderElement = (element: SlideElement) => {
+    console.log('Rendering element:', element);
+    
+    // Ensure valid dimensions and positions with fallbacks
+    const x = typeof element.x === 'number' ? element.x : 0;
+    const y = typeof element.y === 'number' ? element.y : 0;
+    const width = typeof element.width === 'number' ? element.width : 100;
+    const height = typeof element.height === 'number' ? element.height : 50;
+    
     const baseStyle = {
-      left: element.x,
-      top: element.y,
-      width: element.width,
-      height: element.height,
-      backgroundColor: element.backgroundColor,
-      color: element.color,
-      fontSize: element.fontSize,
+      left: `${x}px`,
+      top: `${y}px`,
+      width: `${width}px`,
+      height: `${height}px`,
+      backgroundColor: element.backgroundColor || 'transparent',
+      color: element.color || '#000000',
+      fontSize: element.fontSize ? `${element.fontSize}px` : '16px',
       borderRadius: element.type === 'circle' ? '50%' : '4px',
+      position: 'absolute' as 'absolute',
+      border: '1px solid #ccc',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      overflow: 'hidden'
     };
 
     if (element.type === 'image') {
+      // Check both src (from parser) and content (legacy field) for image data
+      const imgSrc = element.src || element.content;
+      console.log('Rendering image element:', element.id, 'has src:', !!element.src, 'has content:', !!element.content, 'is placeholder:', element.isPlaceholder);
+      
+      if (imgSrc) {
+        return (
+          <div 
+            key={element.id}
+            className={`absolute ${element.isPlaceholder ? 'border-2 border-dashed border-orange-300' : 'border border-solid border-gray-400'} hover:border-blue-500 transition-colors`}
+            style={{
+              ...baseStyle,
+              padding: 0,
+              overflow: 'hidden',
+              backgroundColor: element.isPlaceholder ? '#f8f8f8' : 'transparent',
+              zIndex: 5
+            }}
+          >
+            <img
+              src={imgSrc}
+              alt={`Slide image ${element.id}`}
+              className="w-full h-full object-contain"
+              onLoad={() => console.log(`Image loaded: ${element.id}`)}
+              onError={(e) => {
+                console.error(`Failed to load image: ${element.id}`);
+                // Replace with inline SVG fallback
+                e.currentTarget.src = `data:image/svg+xml;base64,${btoa('<svg xmlns="http://www.w3.org/2000/svg" width="200" height="150" viewBox="0 0 200 150"><rect width="200" height="150" fill="#f0f0f0" stroke="#ccc" stroke-width="2"/><text x="50%" y="50%" font-family="Arial" font-size="14" text-anchor="middle" fill="#666">Image failed to load</text></svg>')}`;                    
+              }}
+            />
+          </div>
+        );
+      } else {
+        console.warn('Image element missing source:', element.id);
+        return (
+          <div
+            key={element.id}
+            className="absolute flex items-center justify-center bg-gray-100 border border-dashed border-gray-300"
+            style={baseStyle}
+          >
+            <span className="text-gray-400">Missing image</span>
+          </div>
+        );
+      }
+    }
+    
+    if (element.type === 'rectangle') {
       return (
-        <img
+        <div
           key={element.id}
-          src={element.content}
-          alt="Slide content"
-          className="absolute border border-dashed border-gray-400 hover:border-blue-500 transition-colors object-contain"
-          style={baseStyle}
+          className="absolute border border-solid border-transparent hover:border-blue-500 transition-colors"
+          style={{
+            ...baseStyle,
+            backgroundColor: element.backgroundColor || '#3b82f6',
+            zIndex: 10
+          }}
+        >
+          {element.content}
+        </div>
+      );
+    }
+    
+    if (element.type === 'circle') {
+      return (
+        <div
+          key={element.id}
+          className="absolute border border-solid border-transparent hover:border-blue-500 transition-colors rounded-full"
+          style={{
+            ...baseStyle,
+            backgroundColor: element.backgroundColor || '#3b82f6',
+            zIndex: 10
+          }}
         />
       );
     }
-
+    
+    // Default for text and other types
     return (
       <div
         key={element.id}
-        className="absolute border border-dashed border-gray-400 hover:border-blue-500 transition-colors flex items-center justify-center"
+        className="absolute border border-solid border-gray-400 hover:border-blue-500 transition-colors"
         style={{
           ...baseStyle,
-          padding: element.type === 'text' ? '8px' : '0'
+          padding: element.type === 'text' ? '8px' : '0',
+          textAlign: 'left',
+          zIndex: 10
         }}
       >
-        {element.content}
+        {element.content || element.type}
       </div>
     );
   };
@@ -124,13 +214,14 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
         >
           Circle
         </Button>
+        {/* Marine Corps styling is now auto-detected and applied during file upload */}
       </div>
 
       {/* Canvas */}
       <div className="flex-1 flex items-center justify-center p-8">
         <div className="bg-white shadow-lg" style={{ width: '800px', height: '600px' }}>
           {/* Slide Editor */}
-          <div className="p-6 border-b border-gray-200">
+          <div className="p-6 border-b border-gray-200 hidden">
             <Input
               value={slide.title}
               onChange={(e) => handleTitleEdit(e.target.value)}
@@ -162,13 +253,28 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
           {/* Canvas Area */}
           <div
             className={cn(
-              "relative flex-1 h-96 overflow-hidden",
+              "relative flex-1 h-full overflow-hidden border border-2 border-blue-300", // Added visible border
               selectedTool && "cursor-crosshair"
             )}
-            style={{ backgroundColor: slide.backgroundColor }}
+            style={{ 
+              backgroundColor: slide.backgroundColor || '#ffffff',
+              position: 'relative', // Ensure positioning context
+            }}
             onClick={handleCanvasClick}
           >
-            {slide.elements.map(renderElement)}
+            {/* Debug information */}
+            <div className="absolute top-0 left-0 bg-white bg-opacity-70 p-1 z-50 text-xs">
+              Slide ID: {slide.id} | Elements: {slide.elements.length}
+            </div>
+            
+            {/* Render all slide elements */}
+            {slide.elements && slide.elements.length > 0 ? (
+              slide.elements.map(renderElement)
+            ) : (
+              <div className="absolute inset-0 flex items-center justify-center text-gray-400">
+                No elements on this slide. Use the tools above to add content.
+              </div>
+            )}
           </div>
         </div>
       </div>
