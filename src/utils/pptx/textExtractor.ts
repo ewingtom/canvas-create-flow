@@ -1,4 +1,5 @@
 import { PPTXTextElement, PPTXParagraph, PPTXTextRun } from '../../types/pptx';
+import { emuToScaledX, emuToScaledY, emuToPoints } from './units';
 
 /**
  * Extracts text content from a shape element
@@ -57,14 +58,12 @@ function extractPositionFromShape(shapeNode: string) {
   
   if (!offMatch || !extMatch) return null;
   
-  // Convert EMUs (English Metric Units) to points
-  const emuToPoints = (emu: string) => parseInt(emu, 10) / 9144; // Simplified for readability
-  
+  // Use the centralized utility functions for consistent EMU to pixel conversion
   return {
-    x: emuToPoints(offMatch[1]),
-    y: emuToPoints(offMatch[2]),
-    width: emuToPoints(extMatch[1]),
-    height: emuToPoints(extMatch[2])
+    x: emuToScaledX(parseInt(offMatch[1], 10)),
+    y: emuToScaledY(parseInt(offMatch[2], 10)),
+    width: emuToScaledX(parseInt(extMatch[1], 10)),
+    height: emuToScaledY(parseInt(extMatch[2], 10))
   };
 }
 
@@ -351,16 +350,55 @@ function extractRunProperties(runContent: string): PPTXTextRun {
   };
   
   // Find run properties node
-  const rPrMatch = runContent.match(/<a:rPr([^>]*)>([\\s\\S]*?)<\/a:rPr>/);
+  const rPrMatch = runContent.match(/<a:rPr([^>]*)>([\s\S]*?)<\/a:rPr>/);  
   if (!rPrMatch) return run;
   
   const rPrAttrs = rPrMatch[1];
   const rPrContent = rPrMatch[2];
   
-  // Extract properties from attributes
+  // Get basic properties from attributes
+  const propsFromAttrs = extractRunPropertiesFromAttrs(rPrAttrs);
+  
+  // Extract color information from content
+  const solidFillMatch = rPrContent.match(/<a:solidFill>([\s\S]*?)<\/a:solidFill>/);  
+  if (solidFillMatch) {
+    const fillContent = solidFillMatch[1];
+    
+    // Extract RGB color
+    const rgbMatch = fillContent.match(/<a:srgbClr val="([^"]*)"/);  
+    if (rgbMatch) {
+      propsFromAttrs.color = {
+        type: 'rgb',
+        value: rgbMatch[1]
+      };
+    }
+    
+    // Extract scheme color
+    const schemeMatch = fillContent.match(/<a:schemeClr val="([^"]*)"/);  
+    if (schemeMatch) {
+      propsFromAttrs.color = {
+        type: 'scheme',
+        value: schemeMatch[1]
+      };
+    }
+  }
+  
+  // Extract highlight color
+  const highlightFillMatch = rPrContent.match(/<a:highlight>([\s\S]*?)<\/a:highlight>/);  
+  if (highlightFillMatch) {
+    const highlightContent = highlightFillMatch[1];
+    const rgbMatch = highlightContent.match(/<a:srgbClr val="([^"]*)"/);  
+    if (rgbMatch) {
+      propsFromAttrs.highlight = {
+        type: 'rgb',
+        value: rgbMatch[1]
+      };
+    }
+  }
+  
   return {
     ...run,
-    ...extractRunPropertiesFromAttrs(rPrAttrs)
+    ...propsFromAttrs
   };
 }
 
@@ -371,7 +409,7 @@ function extractRunPropertiesFromAttrs(attrsStr: string): Partial<PPTXTextRun> {
   const props: Partial<PPTXTextRun> = {};
   
   // Extract font size (in hundredths of points)
-  const szMatch = attrsStr.match(/sz="([^"]*)"/);
+  const szMatch = attrsStr.match(/sz="([^"]*)"/);  
   if (szMatch) {
     props.size = parseInt(szMatch[1], 10) / 100;
   }
@@ -383,7 +421,7 @@ function extractRunPropertiesFromAttrs(attrsStr: string): Partial<PPTXTextRun> {
   props.italic = attrsStr.includes('i="1"') || attrsStr.includes('i="true"');
   
   // Extract underline
-  const uMatch = attrsStr.match(/u="([^"]*)"/);
+  const uMatch = attrsStr.match(/u="([^"]*)"/);  
   props.underline = uMatch && uMatch[1] !== 'none';
   
   // Extract strikethrough
@@ -397,13 +435,13 @@ function extractRunPropertiesFromAttrs(attrsStr: string): Partial<PPTXTextRun> {
   }
   
   // Extract font
-  const latinMatch = attrsStr.match(/typeface="([^"]*)"/);
+  const latinMatch = attrsStr.match(/typeface="([^"]*)"/);  
   if (latinMatch) {
     props.font = latinMatch[1];
   }
   
   // Extract character spacing
-  const spcMatch = attrsStr.match(/spc="([^"]*)"/);
+  const spcMatch = attrsStr.match(/spc="([^"]*)"/);  
   if (spcMatch) {
     props.spacing = parseInt(spcMatch[1], 10) / 100; // Convert to points
   }
@@ -414,6 +452,9 @@ function extractRunPropertiesFromAttrs(attrsStr: string): Partial<PPTXTextRun> {
   } else if (attrsStr.includes('cap="small"')) {
     props.caps = 'small';
   }
+  
+  // No longer extracting highlight here - moved to extractRunProperties
+  // Highlight colors need to be properly extracted from the <a:highlight> element
   
   return props;
 }

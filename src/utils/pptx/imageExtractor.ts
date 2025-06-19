@@ -1,6 +1,7 @@
 import PizZip from 'pizzip';
 import { PPTXImageElement } from '../../types/pptx';
 import { resolveRelationshipTarget } from './relationParser';
+import { emuToScaledX, emuToScaledY } from './units';
 
 // Common paths where images might be located in PPTX files
 const POTENTIAL_IMAGE_PATHS = [
@@ -25,7 +26,9 @@ export function extractImage(
   xml: string,
   picNode: string,
   relationships: Record<string, string>,
-  zip: PizZip
+  zip: PizZip,
+  originalSizeEmu?: { width: number; height: number },
+  scaleFactor: number = 1
 ): PPTXImageElement | null {
   try {
     // Extract image ID
@@ -132,14 +135,12 @@ function extractImagePosition(picNode: string) {
   const flipH = xfrmContent.includes('flipH="1"') || xfrmContent.includes('flipH="true"');
   const flipV = xfrmContent.includes('flipV="1"') || xfrmContent.includes('flipV="true"');
   
-  // Convert EMUs (English Metric Units) to points (1 EMU = 1/914400 inch)
-  const emuToPoints = (emu: string) => parseInt(emu, 10) / 9144;
-  
+  // Use the centralized utility functions for consistent EMU to pixel conversion
   return {
-    x: emuToPoints(offMatch[1]),
-    y: emuToPoints(offMatch[2]),
-    width: emuToPoints(extMatch[1]),
-    height: emuToPoints(extMatch[2]),
+    x: emuToScaledX(parseInt(offMatch[1], 10)),
+    y: emuToScaledY(parseInt(offMatch[2], 10)),
+    width: emuToScaledX(parseInt(extMatch[1], 10)),
+    height: emuToScaledY(parseInt(extMatch[2], 10)),
     rotation,
     flipH,
     flipV

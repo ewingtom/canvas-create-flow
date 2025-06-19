@@ -1,6 +1,19 @@
 import PizZip from 'pizzip';
-import { PPTXShapeElement, PPTXShapeProperties, PPTXFill, PPTXOutline, PPTXColor } from '../../types/pptx';
+import { 
+  PPTXShapeElement, 
+  PPTXShapeProperties, 
+  PPTXFill, 
+  PPTXOutline, 
+  PPTXGradientFill,
+  PPTXColor,
+  PPTXSolidFill,
+  PPTXPatternFill,
+  PPTXBlipFill,
+  PPTXRGBColor,
+  PPTXSchemeColor 
+} from '../../types/pptx';
 import { extractTextFromShape } from './textExtractor';
+import { emuToScaledX, emuToScaledY, emuToPoints } from './units';
 
 /**
  * Extracts shape elements from a slide's XML content
@@ -14,7 +27,9 @@ export function extractShape(
   xml: string,
   shapeNode: string,
   relationships: Record<string, string>,
-  zip: PizZip
+  zip: PizZip,
+  originalSizeEmu?: { width: number; height: number },
+  scaleFactor: number = 1
 ): PPTXShapeElement | null {
   try {
     // Extract shape ID
@@ -85,14 +100,12 @@ function extractShapePosition(shapeNode: string) {
   const flipH = xfrmContent.includes('flipH="1"') || xfrmContent.includes('flipH="true"');
   const flipV = xfrmContent.includes('flipV="1"') || xfrmContent.includes('flipV="true"');
   
-  // Convert EMUs (English Metric Units) to points (1 EMU = 1/914400 inch)
-  const emuToPoints = (emu: string) => parseInt(emu, 10) / 9144; // Simplified for readability (1/100th of a point)
-  
+  // Use the centralized utility functions for consistent EMU to pixel conversion
   return {
-    x: emuToPoints(offMatch[1]),
-    y: emuToPoints(offMatch[2]),
-    width: emuToPoints(extMatch[1]),
-    height: emuToPoints(extMatch[2]),
+    x: emuToScaledX(parseInt(offMatch[1], 10)),
+    y: emuToScaledY(parseInt(offMatch[2], 10)),
+    width: emuToScaledX(parseInt(extMatch[1], 10)),
+    height: emuToScaledY(parseInt(extMatch[2], 10)),
     rotation,
     flipH,
     flipV
@@ -153,7 +166,7 @@ function extractFill(shapeNode: string): PPTXFill | undefined {
   }
   
   // Solid fill
-  const solidFillMatch = shapeNode.match(/<a:solidFill>([\\s\\S]*?)<\/a:solidFill>/);
+  const solidFillMatch = shapeNode.match(/<a:solidFill>([\s\S]*?)<\/a:solidFill>/);
   if (solidFillMatch) {
     const color = extractColor(solidFillMatch[1]);
     if (color) {
@@ -164,36 +177,111 @@ function extractFill(shapeNode: string): PPTXFill | undefined {
     }
   }
   
-  // Gradient fill (simplified for now)
-  if (shapeNode.includes('<a:gradFill>')) {
-    // For now, just indicate it's a gradient - detailed extraction would be more complex
-    return {
+  // Gradient fill - more detailed extraction
+  const gradFillMatch = shapeNode.match(/<a:gradFill([^>]*)>([\s\S]*?)<\/a:gradFill>/);
+  if (gradFillMatch) {
+    const gradAttrs = gradFillMatch[1];
+    const gradContent = gradFillMatch[2];
+    
+    // Default values
+    const gradFill: PPTXGradientFill = {
       type: 'gradient',
-      stops: [
+      stops: [],
+      angle: 0
+    };
+    
+    // Extract gradient path (for radial/path gradients)
+    const pathMatch = gradContent.match(/<a:path[^>]*path="([^"]*)"/);  
+    if (pathMatch) {
+      if (pathMatch[1] === 'circle' || pathMatch[1] === 'rect' || pathMatch[1] === 'shape') {
+        gradFill.path = pathMatch[1];
+      }
+    } else {
+      // Linear gradient - extract angle
+      const angleMatch = gradAttrs.match(/rot="([^"]*)"/);  
+      if (angleMatch) {
+        // Convert angle from 60000ths of a degree
+        gradFill.angle = parseInt(angleMatch[1]) / 60000;
+      }
+    }
+    
+    // Extract gradient stops
+    const gsLstMatch = gradContent.match(/<a:gsLst>([\s\S]*?)<\/a:gsLst>/);
+    if (gsLstMatch) {
+      const stopsContent = gsLstMatch[1];
+      const stopRegex = /<a:gs pos="([^"]*)"[^>]*>([\s\S]*?)<\/a:gs>/g;
+      let stopMatch;
+      
+      while ((stopMatch = stopRegex.exec(stopsContent)) !== null) {
+        const position = parseInt(stopMatch[1]) / 1000; // Convert from thousands
+        const color = extractColor(stopMatch[2]);
+        
+        if (color) {
+          gradFill.stops.push({ position, color });
+        }
+      }
+    }
+    
+    // If no stops were found, provide defaults
+    if (gradFill.stops.length === 0) {
+      gradFill.stops = [
         { position: 0, color: { type: 'rgb', value: '#FFFFFF' } },
         { position: 100, color: { type: 'rgb', value: '#000000' } }
-      ]
-    };
+      ];
+    }
+    
+    return gradFill;
   }
   
-  // Pattern fill
-  if (shapeNode.includes('<a:pattFill>')) {
-    // Simplified pattern fill detection
+  // Pattern fill - enhanced extraction
+  const pattFillMatch = shapeNode.match(/<a:pattFill[^>]*prst="([^"]*)"[^>]*>([\s\S]*?)<\/a:pattFill>/);
+  if (pattFillMatch) {
+    const preset = pattFillMatch[1];
+    const content = pattFillMatch[2];
+    
+    // Extract foreground and background colors
+    const fgFillMatch = content.match(/<a:fgClr>([\s\S]*?)<\/a:fgClr>/);  
+    const bgFillMatch = content.match(/<a:bgClr>([\s\S]*?)<\/a:bgClr>/);  
+    
+    const foreColor: PPTXRGBColor = fgFillMatch ? 
+      (extractColor(fgFillMatch[1]) as PPTXRGBColor || { type: 'rgb', value: '#000000' }) : 
+      { type: 'rgb', value: '#000000' };
+    
+    const backColor: PPTXRGBColor = bgFillMatch ? 
+      (extractColor(bgFillMatch[1]) as PPTXRGBColor || { type: 'rgb', value: '#FFFFFF' }) : 
+      { type: 'rgb', value: '#FFFFFF' };
+    
     return {
       type: 'pattern',
-      preset: 'pct5', // Default pattern type
-      foreColor: { type: 'rgb', value: '#000000' },
-      backColor: { type: 'rgb', value: '#FFFFFF' }
+      preset,
+      foreColor,
+      backColor
     };
   }
   
   // Blip fill (image)
-  if (shapeNode.includes('<a:blipFill>')) {
-    return {
+  const blipFillMatch = shapeNode.match(/<a:blipFill[^>]*>([\s\S]*?)<\/a:blipFill>/);
+  if (blipFillMatch) {
+    const content = blipFillMatch[1];
+    const embedMatch = content.match(/r:embed="([^"]*)"/);  
+    const hasStretch = content.includes('<a:stretch>');
+    const hasTile = content.includes('<a:tile');
+    
+    const blipFill: PPTXBlipFill = {
       type: 'blip',
-      blip: 'image', // Would need to extract the actual image reference
-      stretch: true
+      blip: embedMatch ? embedMatch[1] : 'image',
+      stretch: hasStretch
     };
+    
+    // Add tile property if tile is present
+    if (hasTile) {
+      const tileAttrs = content.match(/<a:tile[^>]*\/?>/);
+      if (tileAttrs) {
+        blipFill.tile = {}; // Create empty tile object that matches the type
+      }
+    }
+    
+    return blipFill;
   }
   
   // Default solid white

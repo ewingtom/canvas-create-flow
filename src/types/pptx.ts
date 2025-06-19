@@ -15,6 +15,9 @@ export interface PPTXBaseElement {
   flipH?: boolean;
   flipV?: boolean;
   zIndex?: number;
+  // For elements inside groups, store original position relative to group
+  groupRelativeX?: number;
+  groupRelativeY?: number;
   placeholder?: {
     type: string;
     index?: number;

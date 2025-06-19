@@ -1,7 +1,9 @@
+// Import PowerPoint types to use for slide background
+import { PPTXFill } from './pptx';
 
 export interface SlideElement {
   id: string;
-  type: 'text' | 'rectangle' | 'circle' | 'image' | 'ellipse' | 'line' | 'group';
+  type: 'text' | 'rectangle' | 'circle' | 'image' | 'ellipse' | 'line' | 'group' | 'shape';
   x: number;
   y: number;
   width: number;
@@ -31,4 +33,8 @@ export interface Slide {
   content: string;
   backgroundColor: string;
   elements: SlideElement[];
+  background?: {
+    fill?: PPTXFill;
+    showMasterBackground?: boolean;
+  };
 }

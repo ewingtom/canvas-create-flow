@@ -1,20 +1,24 @@
 import PizZip from 'pizzip';
-import { PPTXElement } from '../../types/pptx';
+import { PPTXElement, PPTXGroupElement, PPTXTextElement } from '../../types/pptx';
 import { extractShape } from './shapeExtractor';
 import { extractImage } from './imageExtractor';
 import { createImageDataUrl } from './imageExtractor';
 
 /**
- * Extracts all elements from a slide's XML content
+ * Extract elements from a slide's XML content
  * @param slideXml The slide XML content
  * @param slideRels The slide's relationships
- * @param zip The PPTX zip file
- * @returns Array of parsed slide elements
+ * @param zip The PowerPoint zip file
+ * @param originalSizeEmu The original slide dimensions in EMU
+ * @param scaleFactor The scale factor to apply to all elements
+ * @returns The extracted slide elements
  */
 export function extractSlideElements(
   slideXml: string,
   slideRels: Record<string, string>,
-  zip: PizZip
+  zip: PizZip,
+  originalSizeEmu?: { width: number; height: number },
+  scaleFactor: number = 1
 ): PPTXElement[] {
   const elements: PPTXElement[] = [];
   
@@ -48,7 +52,7 @@ export function extractSlideElements(
     extractPictureElements(slideXml, spTreeContent, slideRels, zip, elements);
     
     // Process all group shapes (p:grpSp)
-    extractGroupElements(slideXml, spTreeContent, slideRels, zip, elements);
+    extractGroupElements(slideXml, spTreeContent, slideRels, zip, elements, originalSizeEmu, scaleFactor);
     
     // Process connector shapes (p:cxnSp)
     // TODO: Implement connector extraction
@@ -80,10 +84,12 @@ function extractShapeElements(
   zip: PizZip,
   elements: PPTXElement[]
 ): void {
-  // Find all shape nodes
-  const shapeRegex = /<p:sp>([\s\S]*?)<\/p:sp>/g;
+  // Find all shape nodes using a more robust regex that handles XML variations
+  const shapeRegex = /<p:sp(?:[^>]*)>([\s\S]*?)<\/p:sp>/g;
   let match;
   let shapeCount = 0;
+  
+  console.log('Starting shape extraction with improved regex...');
   
   while ((match = shapeRegex.exec(spTreeContent)) !== null) {
     shapeCount++;
@@ -92,7 +98,7 @@ function extractShapeElements(
     const shape = extractShape(slideXml, shapeNode, slideRels, zip);
     
     if (shape) {
-      console.log(`Added shape: ${shape.type}`);
+      console.log(`Added shape: ${shape.type}, Text content: ${shape.textContent ? 'present' : 'none'}`);
       elements.push(shape);
     }
   }
@@ -100,8 +106,14 @@ function extractShapeElements(
   console.log(`Found ${shapeCount} shapes in slide`);
   if (shapeCount === 0) {
     // Try a simpler regex as fallback
-    const simpleShapeTest = spTreeContent.includes('<p:sp>');
+    const simpleShapeTest = spTreeContent.includes('<p:sp');
     console.log('Simple shape test result:', simpleShapeTest ? 'shapes exist' : 'no shapes');
+    
+    if (simpleShapeTest) {
+      // More aggressive fallback extraction - try to find text in any XML element
+      console.log('Trying fallback text extraction...');
+      extractTextFromPlaceholders(slideXml, spTreeContent, elements);
+    }
   }
 }
 
@@ -142,6 +154,62 @@ function extractPictureElements(
 }
 
 /**
+ * Extract text from placeholders and other elements that might contain text
+ * This is a fallback method when regular shape extraction doesn't find text
+ */
+function extractTextFromPlaceholders(
+  slideXml: string,
+  spTreeContent: string,
+  elements: PPTXElement[]
+): void {
+  try {
+    // Look for any text content in the XML, even outside of shape elements
+    const textRegex = /<a:t>([^<]+)<\/a:t>/g;
+    let textMatch;
+    let textCount = 0;
+    const textContents: string[] = [];
+    
+    while ((textMatch = textRegex.exec(spTreeContent)) !== null) {
+      if (textMatch[1] && textMatch[1].trim()) {
+        textContents.push(textMatch[1].trim());
+        textCount++;
+      }
+    }
+    
+    if (textCount > 0) {
+      console.log(`Found ${textCount} text fragments in slide XML`);
+      
+      // Create a text element with the extracted content
+      const placeholderElement: PPTXTextElement = {
+        id: `text-${Date.now()}`,
+        type: 'text',
+        x: 50,
+        y: 50,
+        width: 600,
+        height: Math.max(50, textContents.length * 20), // Height based on number of text lines
+        zIndex: 5,
+        paragraphs: textContents.map(text => ({
+          text,
+          runs: [{
+            text,
+            bold: false,
+            italic: false,
+            underline: false,
+            color: { type: 'rgb', value: '#000000' }
+          }]
+        }))
+      };
+      
+      elements.push(placeholderElement);
+      console.log('Added fallback text element with content:', 
+                 textContents.join('\n').substring(0, 50) + (textContents.join('\n').length > 50 ? '...' : ''));
+    }
+  } catch (error) {
+    console.error('Error in extractTextFromPlaceholders:', error);
+  }
+}
+
+/**
  * Extract group elements from the slide
  */
 function extractGroupElements(
@@ -149,23 +217,117 @@ function extractGroupElements(
   spTreeContent: string,
   slideRels: Record<string, string>,
   zip: PizZip,
-  elements: PPTXElement[]
+  elements: PPTXElement[],
+  originalSizeEmu?: { width: number; height: number },
+  scaleFactor: number = 1
 ): void {
   // Find all group nodes
-  const groupRegex = /<p:grpSp>([\s\S]*?)<\/p:grpSp>/g;
+  const groupRegex = /<p:grpSp([^>]*)>([\s\S]*?)<\/p:grpSp>/g;
   let match;
   let groupCount = 0;
   
   while ((match = groupRegex.exec(spTreeContent)) !== null) {
     groupCount++;
+    const groupAttrs = match[1] || '';
+    const groupContent = match[2];
     const groupNode = match[0];
+    
     console.log(`Processing group ${groupCount}`);
     
-    // Process shapes within the group
-    extractShapeElements(slideXml, groupNode, slideRels, zip, elements);
+    // Extract group ID
+    const idMatch = groupAttrs.match(/id="([^"]*)"/); 
+    const groupId = idMatch ? idMatch[1] : `group-${Date.now()}-${groupCount}`;
     
-    // Process pictures within the group
-    extractPictureElements(slideXml, groupNode, slideRels, zip, elements);
+    // Extract group position and transform
+    const xfrmMatch = groupContent.match(/<p:xfrm([^>]*)>([\s\S]*?)<\/p:xfrm>/);
+    if (!xfrmMatch) continue;
+    
+    const xfrmAttrs = xfrmMatch[1] || '';
+    const xfrmContent = xfrmMatch[2];
+    
+    // Get position from off attribute
+    const offMatch = xfrmContent.match(/<a:off\s+x="([^"]*)"\s+y="([^"]*)"\/?>/);
+    if (!offMatch) continue;
+    
+    // Get dimensions from ext attribute
+    const extMatch = xfrmContent.match(/<a:ext\s+cx="([^"]*)"\s+cy="([^"]*)"\/?>/);
+    if (!extMatch) continue;
+    
+    // Convert EMUs to pixels using scale factor
+    const x = parseInt(offMatch[1]) / 12700 * scaleFactor;
+    const y = parseInt(offMatch[2]) / 12700 * scaleFactor;
+    const width = parseInt(extMatch[1]) / 12700 * scaleFactor;
+    const height = parseInt(extMatch[2]) / 12700 * scaleFactor;
+    
+    // Check for rotation
+    const rotMatch = xfrmAttrs.match(/rot="([^"]*)"\/?>/);
+    let rotation = 0;
+    if (rotMatch) {
+      // Convert from 60000ths of a degree to degrees
+      rotation = parseInt(rotMatch[1]) / 60000;
+    }
+    
+    // Extract all child elements within the group
+    const childElements: PPTXElement[] = [];
+    
+    // Extract shapes within the group
+    const childShapeRegex = /<p:sp([^>]*)>([\s\S]*?)<\/p:sp>/g;
+    let shapeMatch;
+    
+    while ((shapeMatch = childShapeRegex.exec(groupContent)) !== null) {
+      const shapeNode = shapeMatch[0];
+      const shape = extractShape(slideXml, shapeNode, slideRels, zip, originalSizeEmu, scaleFactor);
+      
+      if (shape) {
+        // Adjust position relative to group
+        shape.groupRelativeX = shape.x;
+        shape.groupRelativeY = shape.y;
+        shape.x += x;
+        shape.y += y;
+        childElements.push(shape);
+      }
+    }
+    
+    // Extract pictures within the group
+    const childPicRegex = /<p:pic([^>]*)>([\s\S]*?)<\/p:pic>/g;
+    let picMatch;
+    
+    while ((picMatch = childPicRegex.exec(groupContent)) !== null) {
+      const picNode = picMatch[0];
+      const picture = extractImage(slideXml, picNode, slideRels, zip, originalSizeEmu, scaleFactor);
+      
+      if (picture) {
+        // Adjust position relative to group
+        picture.groupRelativeX = picture.x;
+        picture.groupRelativeY = picture.y;
+        picture.x += x;
+        picture.y += y;
+        childElements.push(picture);
+      }
+    }
+    
+    // If we found child elements, create a group element
+    if (childElements.length > 0) {
+      const groupElement: PPTXGroupElement = {
+        id: groupId,
+        type: 'group',
+        x: x,
+        y: y,
+        width: width,
+        height: height,
+        rotation: rotation,
+        children: childElements,
+        zIndex: childElements.length > 0 ? 
+          Math.min(...childElements.map(el => el.zIndex || 0)) : 0
+      };
+      
+      elements.push(groupElement);
+    } else {
+      // If no children were extracted, process all shapes and images individually
+      // as a fallback
+      extractShapeElements(slideXml, groupContent, slideRels, zip, elements);
+      extractPictureElements(slideXml, groupContent, slideRels, zip, elements);
+    }
   }
   
   console.log(`Found ${groupCount} groups in slide`);
